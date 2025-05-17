@@ -3,55 +3,73 @@ from telegram.ext import Application, MessageHandler, filters
 import os
 import requests
 import logging
+from datetime import datetime
 
-# Enable logging
+# Configuration
+TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
+HF_API_KEY = os.getenv('HF_API_KEY')  # Your Hugging Face token
+API_URL = "https://router.huggingface.co/novita/v3/openai/chat/completions"
+
+# Logging setup
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Initialize bot
-TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
-HF_TOKEN = os.getenv('HF_TOKEN')
-app = Application.builder().token(TELEGRAM_TOKEN).build()
+headers = {
+    "Authorization": f"Bearer {HF_API_KEY}",
+    "Content-Type": "application/json"
+}
 
-# Hugging Face API
-def query_hf(prompt):
-    try:
-        response = requests.post(
-            "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2",
-            headers={"Authorization": f"Bearer {HF_TOKEN}"},
-            json={"inputs": prompt, "max_new_tokens": 150}
-        )
-        return response.json()[0]["generated_text"]
-    except Exception as e:
-        logger.error(f"HF API Error: {e}")
-        return "⚠️ AI is overloaded. Try again later!"
-
-# Telegram message handler
-async def handle_message(update: Update, context):
-    user_message = update.message.text
-    logger.info(f"User: {update.effective_user.id} - Message: {user_message}")
+def query_hf(prompt: str) -> str:
+    """Query Novita's HF-compatible endpoint with error handling"""
+    payload = {
+        "model": "mistralai/Mistral-7B-Instruct-v0.3",
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.7,
+        "max_tokens": 150
+    }
     
-    ai_response = query_hf(user_message)
+    try:
+        start_time = datetime.now()
+        response = requests.post(
+            API_URL,
+            headers=headers,
+            json=payload,
+            timeout=30  # 30-second timeout
+        )
+        response.raise_for_status()  # Raises HTTPError for bad responses
+        return response.json()["choices"][0]["message"]["content"]
+        
+    except requests.exceptions.RequestException as e:
+        logger.error(f"API Error: {str(e)}")
+        return "⚠️ The AI service is currently overloaded. Please try again later."
+    except (KeyError, IndexError) as e:
+        logger.error(f"Response Parsing Error: {str(e)}")
+        return "⚠️ I'm having trouble understanding the response. Try rephrasing your question."
+
+async def handle_message(update: Update, context):
+    """Process Telegram messages"""
+    user_msg = update.message.text
+    logger.info(f"Processing message from {update.effective_user.id}: {user_msg[:50]}...")
+    
+    ai_response = query_hf(user_msg)
     await update.message.reply_text(ai_response)
 
-# Register handler
+# Bot initialization
+app = Application.builder().token(TELEGRAM_TOKEN).build()
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-# Webhook setup for Render
-async def set_webhook():
-    port = int(os.environ.get('PORT', 5000))
-    webhook_url = f"https://your-render-service.onrender.com/{TELEGRAM_TOKEN}"
-    await app.bot.set_webhook(webhook_url)
-    logger.info(f"Webhook set to {webhook_url}")
-
+# Webhook configuration for Render
 if __name__ == '__main__':
-    # For Render deployment
+    PORT = int(os.getenv('PORT', 5000))
+    WEBHOOK_URL = f"https://your-render-service.onrender.com/{TELEGRAM_TOKEN}"
+    
     app.run_webhook(
         listen='0.0.0.0',
-        port=int(os.environ.get('PORT', 5000)),
-        webhook_url=f"https://your-render-service.onrender.com/{TELEGRAM_TOKEN}",
-        url_path=TELEGRAM_TOKEN
+        port=PORT,
+        webhook_url=WEBHOOK_URL,
+        url_path=TELEGRAM_TOKEN,
+        drop_pending_updates=True
     )
