@@ -1,0 +1,4 @@
+TELEGRAM_TOKEN = "7535621079:AAFF-g5kbT5PAmklQG02r0BfjDjW-I_JEmA"  # From @BotFather
+HF_API_TOKEN = "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"  # From HF
+GIST_ID = "e5b09e6f766b87254ed720117219bc13"  # From your Gist URL
+GITHUB_TOKEN = "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"  # Classic token
